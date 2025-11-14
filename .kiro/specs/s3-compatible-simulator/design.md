@@ -4,13 +4,19 @@
 
 本システムは、Pythonの標準ライブラリのみを使用したS3 API互換の簡易シミュレーターです。`http.server`モジュールを使用してHTTPサーバを構築し、ローカルファイルシステム上のディレクトリをS3バケットとして扱い、PDFファイルのダウンロード機能を提供します。
 
+**対象プラットフォーム**: Windows/Linux（Python 3.7以上）（要件1.1、1.2）
+**主要機能**: 認証不要のHTTP GET リクエストによるPDFファイルダウンロード（要件2.1、2.2）
+**対象クライアント**: curl、Dify HTTPノードなど（要件5.1、6.1）
+
 ### 主要な設計決定
 
-1. **HTTPサーバ**: `http.server.HTTPServer`と`http.server.BaseHTTPRequestHandler`を使用
-2. **パス処理**: `pathlib.Path`を使用してクロスプラットフォーム対応
-3. **URL処理**: `urllib.parse`を使用してURLデコード
-4. **設定管理**: コマンドライン引数（`argparse`）または環境変数で設定
-5. **ログ出力**: 標準出力に全リクエストをログ出力
+1. **HTTPサーバ**: `http.server.HTTPServer`と`http.server.BaseHTTPRequestHandler`を使用（要件1.4、2.1）
+2. **パス処理**: `pathlib.Path`を使用してクロスプラットフォーム対応（要件1.3）
+3. **URL処理**: `urllib.parse`を使用してURLデコード（要件4.3）
+4. **設定管理**: コマンドライン引数（`argparse`）で設定（要件1.4）
+5. **ログ出力**: 標準出力に全リクエストをログ出力（要件5.3）
+6. **認証なし**: 開発・テスト用途のため認証機能は実装しない（要件2.1）
+7. **PDFファイル限定**: セキュリティとシンプルさのため、PDFファイルのみをサポート（要件3.3）
 
 ## アーキテクチャ
 
@@ -73,6 +79,12 @@ class BucketManager:
         
         引数:
             bucket_configs: {bucket_name: directory_path}
+        
+        例外:
+            ValueError: バケットディレクトリが存在しない場合
+        
+        注意:
+            起動時に全バケットディレクトリの存在を検証します（要件3.2）
         """
         pass
     
@@ -142,7 +154,11 @@ class S3SimulatorHandler(BaseHTTPRequestHandler):
         pass
     
     def _send_file_response(self, file_data: bytes):
-        """PDFファイルレスポンスを送信"""
+        """
+        PDFファイルレスポンスを送信
+        - HTTP 200ステータス
+        - Content-Type: application/pdf（要件2.4）
+        """
         pass
     
     def _send_error_response(self, status_code: int, error_code: str, message: str):
@@ -190,6 +206,8 @@ class FileTypeError(S3SimulatorError):
 
 ### S3 APIパス形式
 
+S3互換のパス形式をサポート（要件4.1、4.2）：
+
 ```
 GET /{bucket}/{key}
 
@@ -200,6 +218,8 @@ GET /documents/reports/2024/report.pdf
 ```
 
 ### エラーレスポンス形式
+
+JSON形式のエラーレスポンス（要件8.4）：
 
 ```json
 {
@@ -214,14 +234,16 @@ GET /documents/reports/2024/report.pdf
 
 ### HTTPステータスコードマッピング
 
-| エラー種別 | HTTPステータス | エラーコード | 説明 |
-|-----------|---------------|-------------|------|
-| バケット不存在 | 404 | NoSuchBucket | 指定されたバケットが存在しない |
-| オブジェクト不存在 | 404 | NoSuchKey | 指定されたキーが存在しない |
-| パストラバーサル | 403 | AccessDenied | バケット外へのアクセス試行 |
-| ファイルタイプエラー | 403 | InvalidFileType | PDF以外のファイルへのアクセス |
-| ファイル読み込みエラー | 500 | InternalError | サーバ内部エラー |
-| 不正なパス形式 | 400 | InvalidRequest | リクエストパスが不正 |
+適切なHTTPステータスコードとエラーメッセージを返却（要件8.1、8.2、8.3、8.4）：
+
+| エラー種別 | HTTPステータス | エラーコード | 説明 | 要件 |
+|-----------|---------------|-------------|------|------|
+| バケット不存在 | 404 | NoSuchBucket | 指定されたバケットが存在しない | 8.1 |
+| オブジェクト不存在 | 404 | NoSuchKey | 指定されたキーが存在しない | 2.3 |
+| パストラバーサル | 403 | AccessDenied | バケット外へのアクセス試行 | 8.2 |
+| ファイルタイプエラー | 403 | InvalidFileType | PDF以外のファイルへのアクセス | 3.3 |
+| ファイル読み込みエラー | 500 | InternalError | サーバ内部エラー | 8.3 |
+| 不正なパス形式 | 400 | InvalidRequest | リクエストパスが不正 | 4.1 |
 
 ### エラーハンドリングフロー
 
@@ -364,25 +386,28 @@ def _is_safe_path(self, base_path: Path, target_path: Path) -> bool:
 
 ### 同時接続
 
-- `http.server`はシングルスレッド
-- 同時リクエストは順次処理される
-- 高負荷環境では`ThreadingHTTPServer`への変更を検討
+- `http.server.HTTPServer`はシングルスレッドで動作
+- 複数のクライアントからの同時リクエストは順次処理される（要件5.4）
+- 各リクエストは独立して処理されるため、基本的な並行アクセスには対応
+- 高負荷環境や真の並行処理が必要な場合は`ThreadingHTTPServer`への変更を検討
 
 ## ドキュメント構成
 
 ### README.md
 
-以下のセクションを含む：
+以下のセクションを含む（要件7対応）：
 
-1. **概要**: シミュレーターの目的と機能
+1. **概要**: シミュレーターの目的と機能（要件7.1）
 2. **インストール**: Python要件（3.7+推奨）
-3. **セットアップ**: バケットディレクトリの準備
+3. **セットアップ**: バケットディレクトリの準備（要件7.1、7.2）
 4. **使用方法**: 起動コマンドとオプション
-5. **curlテスト**: テストコマンド例
-6. **Dify連携**: HTTPノード設定方法
+5. **curlテスト**: テストコマンド例（要件5.2、7.3）
+6. **Dify連携**: HTTPノード設定方法（要件6.4、7.4）
 7. **トラブルシューティング**: よくある問題と解決方法
 
 ### ディレクトリ構造例
+
+バケット内のディレクトリ構造はオブジェクトキーパスとして保持されます（要件3.4、4.4）：
 
 ```
 test-bucket/
@@ -401,21 +426,25 @@ test-bucket/
 
 ### curlテスト例
 
+curlコマンドによる動作確認（要件5.1、5.2）：
+
 ```bash
 # 基本的なダウンロード
 curl http://localhost:8000/documents/manual.pdf -o manual.pdf
 
-# ネストされたパス
+# ネストされたパス（要件4.4）
 curl http://localhost:8000/reports/2024/january.pdf -o january.pdf
 
 # ヘッダー確認
 curl -I http://localhost:8000/documents/manual.pdf
 
-# エラーケース
+# エラーケース（要件2.3）
 curl http://localhost:8000/documents/notfound.pdf
 ```
 
 ### Dify HTTPノード設定
+
+Difyワークフローからの呼び出し設定（要件6.1、6.2、6.3、6.4）：
 
 ```yaml
 HTTPノード設定:

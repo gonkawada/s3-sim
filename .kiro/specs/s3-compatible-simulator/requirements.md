@@ -20,10 +20,10 @@
 
 #### 受入基準
 
-1. THE Simulator SHALL execute on Windows operating systems using Python standard library only
-2. THE Simulator SHALL execute on Linux operating systems using Python standard library only
+1. THE Simulator SHALL execute on Windows operating systems using Python standard library version 3.7 or higher
+2. THE Simulator SHALL execute on Linux operating systems using Python standard library version 3.7 or higher
 3. THE Simulator SHALL use cross-platform file path handling for Bucket access
-4. THE Simulator SHALL start an HTTP Server on a configurable port number
+4. THE Simulator SHALL start an HTTP Server on a port number specified via command-line argument
 
 ### 要件2
 
@@ -64,10 +64,10 @@
 
 #### 受入基準
 
-1. THE Simulator SHALL respond to curl GET requests with PDF file content
+1. WHEN Client sends GET request via curl, THE Simulator SHALL respond with PDF file content
 2. THE Simulator SHALL provide example curl commands in documentation
-3. THE Simulator SHALL log incoming requests to standard output for debugging
-4. THE Simulator SHALL handle concurrent requests from multiple curl clients
+3. WHEN HTTP Server receives a request, THE Simulator SHALL log the request details to standard output
+4. THE Simulator SHALL handle concurrent requests from multiple Client instances
 
 ### 要件6
 
@@ -75,9 +75,9 @@
 
 #### 受入基準
 
-1. THE Simulator SHALL accept HTTP GET requests from Dify HTTP node
-2. THE Simulator SHALL process Object key passed as variable from Dify workflow
-3. THE Simulator SHALL return PDF content that Dify HTTP node can process
+1. WHEN Dify HTTP node sends GET request, THE Simulator SHALL accept and process the request
+2. WHEN Dify workflow passes Object key as variable, THE Simulator SHALL process the variable in the request path
+3. THE Simulator SHALL return PDF content in a format that Dify HTTP node can process
 4. THE Simulator SHALL provide documentation with Dify HTTP node configuration examples
 
 ### 要件7

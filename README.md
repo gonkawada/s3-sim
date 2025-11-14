@@ -313,6 +313,308 @@ HTTPノード設定:
   └─ エラー → [エラーハンドリング]
 ```
 
+### IF/ELSEノードでのエラー処理設定
+
+DifyのIF/ELSEノードを使用して、HTTPリクエストのステータスコードに応じた処理を実装できます。
+
+#### 設定例1: 基本的なエラー処理
+
+```yaml
+IF/ELSEノード設定:
+  名前: HTTPレスポンスチェック
+  
+  条件1（IF）:
+    変数: {{http_node.status_code}}
+    演算子: 等しい (=)
+    値: 200
+    説明: 成功時の処理
+    
+  条件2（ELIF）:
+    変数: {{http_node.status_code}}
+    演算子: 等しい (=)
+    値: 404
+    説明: ファイルが見つからない場合
+    
+  条件3（ELSE）:
+    説明: その他のエラー
+```
+
+**フロー図:**
+
+```
+[HTTPノード: PDFファイル取得]
+  ↓
+[IF/ELSEノード]
+  ├─ IF (status_code = 200)
+  │   ↓
+  │   [PDF処理ノード]
+  │   ↓
+  │   [成功メッセージ]
+  │
+  ├─ ELIF (status_code = 404)
+  │   ↓
+  │   [エラーログ出力]
+  │   ↓
+  │   [代替ファイル取得]
+  │
+  └─ ELSE
+      ↓
+      [エラーログ出力]
+      ↓
+      [エラー通知]
+```
+
+#### 設定例2: 詳細なステータスコード判定
+
+```yaml
+IF/ELSEノード設定:
+  名前: 詳細エラーハンドリング
+  
+  条件1（IF）:
+    変数: {{http_node.status_code}}
+    演算子: 等しい (=)
+    値: 200
+    → 次のノード: [PDF解析ノード]
+    
+  条件2（ELIF）:
+    変数: {{http_node.status_code}}
+    演算子: 等しい (=)
+    値: 404
+    → 次のノード: [404エラー処理]
+    説明: ファイルまたはバケットが存在しない
+    
+  条件3（ELIF）:
+    変数: {{http_node.status_code}}
+    演算子: 等しい (=)
+    値: 403
+    → 次のノード: [403エラー処理]
+    説明: アクセス拒否またはファイルタイプエラー
+    
+  条件4（ELIF）:
+    変数: {{http_node.status_code}}
+    演算子: 等しい (=)
+    値: 500
+    → 次のノード: [500エラー処理]
+    説明: サーバエラー
+    
+  条件5（ELSE）:
+    → 次のノード: [一般エラー処理]
+    説明: その他の予期しないエラー
+```
+
+#### 設定例3: エラーメッセージの取得と処理
+
+```yaml
+ワークフロー構成:
+
+1. [HTTPノード: PDFファイル取得]
+   出力変数:
+     - status_code: {{http_node.status_code}}
+     - response_body: {{http_node.body}}
+     - error_code: {{http_node.body.error.code}}
+     - error_message: {{http_node.body.error.message}}
+
+2. [IF/ELSEノード: ステータスチェック]
+   
+   IF (status_code = 200):
+     ↓
+     [変数設定ノード]
+       success = true
+       pdf_data = {{http_node.body}}
+     ↓
+     [PDF処理ノード]
+   
+   ELIF (status_code = 404):
+     ↓
+     [変数設定ノード]
+       success = false
+       error_type = "NotFound"
+       error_detail = {{http_node.body.error.message}}
+     ↓
+     [条件分岐: エラーコード判定]
+       IF (error_code = "NoSuchKey"):
+         → [ログ出力: "ファイルが存在しません"]
+       ELIF (error_code = "NoSuchBucket"):
+         → [ログ出力: "バケットが存在しません"]
+   
+   ELIF (status_code = 403):
+     ↓
+     [変数設定ノード]
+       success = false
+       error_type = "Forbidden"
+       error_detail = {{http_node.body.error.message}}
+     ↓
+     [条件分岐: エラーコード判定]
+       IF (error_code = "AccessDenied"):
+         → [ログ出力: "パストラバーサル検出"]
+       ELIF (error_code = "InvalidFileType"):
+         → [ログ出力: "PDFファイルのみ許可されています"]
+   
+   ELSE:
+     ↓
+     [変数設定ノード]
+       success = false
+       error_type = "Unknown"
+       error_detail = "予期しないエラーが発生しました"
+     ↓
+     [エラーログ出力]
+```
+
+#### 設定例4: リトライ機能付きエラー処理
+
+```yaml
+ワークフロー構成:
+
+1. [変数設定ノード: 初期化]
+   retry_count = 0
+   max_retries = 3
+   success = false
+
+2. [HTTPノード: PDFファイル取得]
+   URL: http://localhost:8000/{{bucket}}/{{file_path}}
+
+3. [IF/ELSEノード: レスポンスチェック]
+   
+   IF (status_code = 200):
+     ↓
+     [変数設定ノード]
+       success = true
+     ↓
+     [PDF処理ノード]
+     ↓
+     [終了]
+   
+   ELIF (status_code = 404 OR status_code = 403):
+     ↓
+     [変数設定ノード]
+       success = false
+     ↓
+     [エラーログ出力]
+     ↓
+     [終了]（リトライ不要なエラー）
+   
+   ELSE:
+     ↓
+     [変数設定ノード]
+       retry_count = {{retry_count + 1}}
+     ↓
+     [IF/ELSEノード: リトライ判定]
+       IF (retry_count < max_retries):
+         ↓
+         [待機ノード: 2秒]
+         ↓
+         [HTTPノード: PDFファイル取得]（ループバック）
+       ELSE:
+         ↓
+         [エラーログ出力: "最大リトライ回数に達しました"]
+         ↓
+         [終了]
+```
+
+#### 設定例5: 複数条件の組み合わせ
+
+```yaml
+IF/ELSEノード設定:
+  名前: 複合条件チェック
+  
+  条件1（IF）:
+    論理演算: AND
+    条件A:
+      変数: {{http_node.status_code}}
+      演算子: 等しい (=)
+      値: 200
+    条件B:
+      変数: {{http_node.headers.content-type}}
+      演算子: 含む (contains)
+      値: "application/pdf"
+    → 成功処理
+    
+  条件2（ELIF）:
+    論理演算: OR
+    条件A:
+      変数: {{http_node.status_code}}
+      演算子: 等しい (=)
+      値: 404
+    条件B:
+      変数: {{http_node.status_code}}
+      演算子: 等しい (=)
+      値: 403
+    → クライアントエラー処理
+    
+  条件3（ELIF）:
+    変数: {{http_node.status_code}}
+    演算子: 以上 (>=)
+    値: 500
+    → サーバエラー処理
+    
+  条件4（ELSE）:
+    → 一般エラー処理
+```
+
+#### エラーコード別の処理例
+
+```yaml
+エラーコード: NoSuchKey (404)
+処理:
+  1. [ログ出力ノード]
+     メッセージ: "ファイルが見つかりません: {{file_path}}"
+  2. [変数設定ノード]
+     alternative_path = "documents/default.pdf"
+  3. [HTTPノード: 代替ファイル取得]
+     URL: http://localhost:8000/{{bucket}}/{{alternative_path}}
+
+エラーコード: NoSuchBucket (404)
+処理:
+  1. [ログ出力ノード]
+     メッセージ: "バケットが存在しません: {{bucket}}"
+  2. [変数設定ノード]
+     default_bucket = "test-bucket"
+  3. [HTTPノード: デフォルトバケットで再試行]
+     URL: http://localhost:8000/{{default_bucket}}/{{file_path}}
+
+エラーコード: AccessDenied (403)
+処理:
+  1. [ログ出力ノード]
+     メッセージ: "アクセスが拒否されました"
+     レベル: WARNING
+  2. [通知ノード]
+     内容: "不正なパスアクセスが検出されました"
+  3. [終了]
+
+エラーコード: InvalidFileType (403)
+処理:
+  1. [ログ出力ノード]
+     メッセージ: "PDFファイルのみ許可されています"
+  2. [変数設定ノード]
+     corrected_path = {{file_path}}.pdf
+  3. [HTTPノード: 拡張子を追加して再試行]
+     URL: http://localhost:8000/{{bucket}}/{{corrected_path}}
+```
+
+#### 実装のベストプラクティス
+
+1. **必ずステータスコードをチェック**
+   - HTTPノードの直後にIF/ELSEノードを配置
+   - 200以外のステータスコードを適切に処理
+
+2. **エラーメッセージを記録**
+   - `{{http_node.body.error.message}}` をログに出力
+   - デバッグ時に役立つ情報を保存
+
+3. **リトライロジックの実装**
+   - 一時的なエラー（500番台）はリトライ
+   - 永続的なエラー（404, 403）はリトライしない
+
+4. **フォールバック処理**
+   - デフォルトファイルの使用
+   - 代替パスの試行
+   - ユーザーへの通知
+
+5. **エラーの分類**
+   - クライアントエラー（4xx）: 設定やパスの問題
+   - サーバエラー（5xx）: シミュレーターの問題
+   - ネットワークエラー: 接続の問題
+
 ### トラブルシューティング（Dify）
 
 #### 接続エラー
